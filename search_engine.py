@@ -1,6 +1,10 @@
 import yt_dlp
 import json
 import os
+from scenedetect import VideoManager, SceneManager
+from scenedetect.detectors import ContentDetector
+import cv2
+import numpy as np
 
 # Get the directory of the script and construct the metadata file path
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -80,6 +84,55 @@ def download_video(query, metadata):
         }
         return metadata
 
+def is_black_scene(image_path, threshold=10):
+    """Check if the image is predominantly black."""
+    image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    if image is None:
+        return False  # Skip if image couldn't be loaded
+    # Calculate the percentage of pixels below the black threshold
+    black_pixel_count = np.sum(image < threshold)
+    total_pixel_count = image.size
+    black_percentage = (black_pixel_count / total_pixel_count) * 100
+    return black_percentage > 90  # Consider as black if >90% pixels are black
+
+def detect_scenes(video_path, output_folder):
+    """Detect scenes and save images to the output folder."""
+    # Check if scenes already exist
+    if os.path.exists(output_folder) and any(f.endswith(".jpg") for f in os.listdir(output_folder)):
+        print(f"Scenes already exist in {output_folder}. Skipping scene detection.")
+        return
+
+    video_manager = VideoManager([video_path])
+    scene_manager = SceneManager()
+    scene_manager.add_detector(ContentDetector(threshold=40.0))  # Adjust threshold here
+    video_manager.set_downscale_factor()
+
+    video_manager.start()
+    scene_manager.detect_scenes(frame_source=video_manager)
+
+    # Retrieve the list of detected scenes
+    scenes = scene_manager.get_scene_list()
+    print(f"Detected {len(scenes)} scenes.")
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+
+    for i, scene in enumerate(scenes):
+        start_frame, end_frame = scene
+        output_path = f"{output_folder}/scene_{i+1}.jpg"
+        # OpenCV to extract and save frames
+        cap = cv2.VideoCapture(video_path)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame.get_frames())  # Set the frame position
+        ret, frame = cap.read()
+        if ret:
+            cv2.imwrite(output_path, frame)  # Save the frame as an image
+        cap.release()
+
+        # Remove black scenes
+        if is_black_scene(output_path):
+            os.remove(output_path)
+
+    video_manager.release()
+
 def main():
     # Search term for the video
     search_term = "super mario movie trailer"
@@ -104,5 +157,16 @@ def main():
     if not os.path.exists(video_path):
         print(f"Error: Video file not found at path: {video_path}")
         return
+    
+    # Define the output folder for saving scene images
+    output_folder = os.path.join(script_dir, "scenes")  # Folder to save extracted scenes
+    print(f"Output folder for scenes: {output_folder}")
+
+    # Detect scenes and save scene images
+    print("Detecting scenes...")
+    detect_scenes(video_path, output_folder)
+    print(f"Scenes saved in {output_folder}")
+
+
 if __name__ == "__main__":
     main()
