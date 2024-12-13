@@ -11,6 +11,9 @@ from rapidfuzz import fuzz
 from math import ceil, sqrt
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
+import google.generativeai as genai
+import time
+
 
 # Get the directory of the script and construct the metadata file path
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -302,52 +305,163 @@ class CaptionCompleter(Completer):
             if word.startswith(text):  # Match words starting with the input
                 yield Completion(word, start_position=-len(text))
 
+
+def search_video_with_gemini(video_path):
+    """
+    Use Google's Generative AI library to analyze a video using Gemini 1.5 Flash.
+    """
+    # Configure the Gemini API
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        print("Error: GEMINI_API_KEY environment variable not set.")
+        return
+
+    genai.configure(api_key=api_key)
+
+    # Check if the video file exists
+    if not os.path.exists(video_path):
+        print(f"Error: Video file not found at {video_path}")
+        return
+
+    # Ask the user for a descriptive query
+    query = input("Using a video model. What would you like me to find in the video? ").strip()
+    if not query:
+        print("No query provided. Exiting.")
+        return
+
+    # Upload the video file
+    try:
+        print(f"Uploading video file: {video_path}")
+        video_file = genai.upload_file(video_path)
+    except Exception as e:
+        print(f"Error uploading video: {e}")
+        return
+
+    # Wait for the file to become ACTIVE
+    if not wait_for_file_to_be_active(video_file):
+        print("File did not become ACTIVE. Exiting.")
+        return
+
+    # Use the Gemini model to analyze the uploaded file
+    print("Analyzing video with Gemini 1.5 Flash...")
+    try:
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        response = model.generate_content(
+            [f"""Analyze the uploaded video and identify the specific timestamps or frame ranges for scenes that match the provided query.
+            For each identified scene, provide:
+            2. The start time in seconds.
+            3. The end time in seconds.
+            Example of the desired response format:
+            [
+            {{
+                "start": 12.5,
+                "end": 14.0
+            }},
+            {{
+                "start": 45.3,
+                "end": 50.2
+            }}
+            ]
+            Ensure the response is in valid JSON format. If no matching scenes are found, return an empty JSON array [].
+            Query: {query}""", video_file],
+            generation_config=genai.GenerationConfig(
+                max_output_tokens=400,  # Limit the response to 400 tokens
+                temperature=0.4  # Set the temperature for response creativity
+            )
+        )
+
+        # Handle the response
+        if response and hasattr(response, "text"):
+            print("Video analysis successful. Results:")
+            print(response.text)
+        else:
+            print("Error: No valid response received from the Gemini API.")
+    except Exception as e:
+        print(f"An error occurred while analyzing the video: {e}")
+
+
+def wait_for_file_to_be_active(video_file, wait_time=10, max_wait_time=300):
+    """
+    Wait for the uploaded file to become ACTIVE using the Google AI API file status check.
+    :param video_file: Uploaded video file object.
+    :param wait_time: Time to wait between retries (in seconds).
+    :param max_wait_time: Maximum time to wait before giving up (in seconds).
+    :return: True if the file becomes ACTIVE, False otherwise.
+    """
+    file_name = video_file.name  # Extract the file name from the video file object
+    total_wait_time = 0  # Keep track of total time waited
+
+    while total_wait_time < max_wait_time:
+        try:
+            # Use the API to check the file's status
+            file_status_response = genai.get_file(file_name)
+            state = file_status_response.state.name  # Assume 'state' indicates the file's readiness
+            if state == "ACTIVE":
+                print(f"File {file_name} is ACTIVE.")
+                return True
+            print(f"File {file_name} is in {state} state. Retrying in {wait_time} seconds...")
+        except Exception as e:
+            print(f"Error while checking file status: {e}")
+
+        time.sleep(wait_time)
+        total_wait_time += wait_time
+
+    print(f"File {file_name} did not become ACTIVE within {max_wait_time} seconds.")
+    return False
+
+
+
 def main():
-    # Search term for the video
+    print("Choose the search method:")
+    print("1. Search using an image-based model")
+    print("2. Search using a video-based model (Google Gemini 1.5 Flash)")
+    choice = input("Enter your choice (1 or 2): ").strip()
+
+    # Define the video path for the Mario video
     search_term = "super mario movie trailer"
     print(f"Starting video search for: {search_term}")
 
-    # Load metadata from the JSON file
+    # Load metadata
     metadata = load_metadata()
-    print("Loaded metadata:", metadata)
 
-    # Download the video if not already downloaded
+    # Download video
     updated_metadata = download_video(search_term, metadata)
     save_metadata(updated_metadata)
-    print("Updated metadata:", updated_metadata)
 
-    # Get the video path from the metadata
-    video_info = list(updated_metadata.values())[0]  # Get the first video's metadata
-    video_title = video_info['title']
+    # Get video path
+    video_info = list(updated_metadata.values())[0]
+    video_title = video_info["title"]
     video_path = os.path.join(script_dir, f"{video_title.replace(' ', '_').replace('|', '').replace(':', '')}.mp4")
     print(f"Video path: {video_path}")
 
-    # Check if the video file exists in the directory
+    # Check video existence
     if not os.path.exists(video_path):
         print(f"Error: Video file not found at path: {video_path}")
         return
-    
-    # Define the output folder for saving scene images
-    output_folder = os.path.join(script_dir, "scenes")  # Folder to save extracted scenes
-    print(f"Output folder for scenes: {output_folder}")
 
-    # Detect scenes and save scene images
-    print("Detecting scenes...")
-    detect_scenes(video_path, output_folder)
-    print(f"Scenes saved in {output_folder}")
+    if choice == "1":
+        # Run the existing image-based search
+        print("Using the image-based model for search...")
 
-    # Load the model for image captioning
-    model = load_model()
+        # Detect scenes
+        output_folder = os.path.join(script_dir, "scenes")
+        detect_scenes(video_path, output_folder)
 
-    # Generate captions for scenes
-    captions_file = os.path.join(script_dir, "scene_captions.json")
-    generate_captions(output_folder, captions_file, model)
-    print(f"Captions saved to {captions_file}")
+        # Generate captions
+        model = load_model()
+        captions_file = os.path.join(script_dir, "scene_captions.json")
+        generate_captions(output_folder, captions_file, model)
 
-    # Allow the user to search scenes by a word with a threshold for similarity
-    search_scenes_with_autocomplete(captions_file, threshold=75)  # Adjust the threshold as needed
+        # Search captions
+        search_scenes_with_autocomplete(captions_file, threshold=75)
 
+    elif choice == "2":
+        # Run the video-based search using Gemini
+        print("Using the video-based model for search...")
+        search_video_with_gemini(video_path)
 
+    else:
+        print("Invalid choice. Exiting program.")
 
 if __name__ == "__main__":
     main()
