@@ -8,6 +8,7 @@ import numpy as np
 import moondream as md
 from PIL import Image
 from rapidfuzz import fuzz
+from math import ceil, sqrt
 
 # Get the directory of the script and construct the metadata file path
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -216,8 +217,58 @@ def search_scenes_by_word(captions_file, threshold=70):
         print(f"Scenes with captions similar to '{search_word}' (threshold: {threshold}%):")
         for scene, (caption, similarity) in matching_scenes.items():
             print(f"Scene {scene}: {caption} (Similarity: {similarity}%)")
+        
+        # Create a collage of matching scenes
+        scene_folder = os.path.join(script_dir, "scenes")
+        create_collage(scene_folder, matching_scenes)
     else:
         print(f"No scenes found with captions similar to '{search_word}' (threshold: {threshold}%).")
+
+def create_collage(scene_folder, matching_scenes):
+    """
+    Create a collage of all matching scene images and save it to 'collage.png'.
+    """
+    if not matching_scenes:
+        print("No matching scenes to create a collage.")
+        return
+
+    # Get paths of matching scene images
+    image_paths = [
+        os.path.join(scene_folder, f"scene_{scene}.jpg")
+        for scene in matching_scenes.keys()
+        if os.path.exists(os.path.join(scene_folder, f"scene_{scene}.jpg"))
+    ]
+
+    if not image_paths:
+        print("No images found for matching scenes.")
+        return
+
+    print(f"Creating a collage of {len(image_paths)} scenes...")
+
+    # Open all images
+    images = [Image.open(path) for path in image_paths]
+
+    # Get dimensions for the collage grid
+    num_images = len(images)
+    grid_size = ceil(sqrt(num_images))  # Determine grid size (square root of total images)
+    max_width = max(image.width for image in images)
+    max_height = max(image.height for image in images)
+
+    # Create a blank image for the collage
+    collage_width = grid_size * max_width
+    collage_height = grid_size * max_height
+    collage = Image.new("RGB", (collage_width, collage_height), (255, 255, 255))
+
+    # Paste each image into the collage
+    for idx, img in enumerate(images):
+        x = (idx % grid_size) * max_width
+        y = (idx // grid_size) * max_height
+        collage.paste(img, (x, y))
+
+    # Save the collage to a file
+    collage_file = os.path.join(script_dir, "collage.png")
+    collage.save(collage_file)
+    print(f"Collage created and saved as '{collage_file}'.")
 
 def main():
     # Search term for the video
