@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 import moondream as md
 from PIL import Image
+from rapidfuzz import fuzz
 
 # Get the directory of the script and construct the metadata file path
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -185,9 +186,9 @@ def generate_captions(scene_folder, output_file, model):
     print("Captions saved successfully.")
 
 
-def search_scenes_by_word(captions_file):
+def search_scenes_by_word(captions_file, threshold=70):
     """
-    Search scenes for a specific word in captions.
+    Search scenes for a specific word or similar words in captions using RapidFuzz.
     """
     if not os.path.exists(captions_file):
         print(f"Error: Captions file not found at path: {captions_file}")
@@ -197,22 +198,26 @@ def search_scenes_by_word(captions_file):
     with open(captions_file, "r") as file:
         captions = json.load(file)
     
-    print("Search the video using a word:")
+    print("Search the video using a word or similar words:")
     search_word = input("Enter a word: ").strip().lower()
 
     if not search_word:
         print("No word entered. Please try again.")
         return
 
-    # Find scenes containing the word
-    matching_scenes = {scene: caption for scene, caption in captions.items() if search_word in caption.lower()}
+    # Find scenes with captions similar to the input word
+    matching_scenes = {}
+    for scene, caption in captions.items():
+        similarity = fuzz.partial_ratio(search_word, caption.lower())
+        if similarity >= threshold:
+            matching_scenes[scene] = (caption, similarity)
 
     if matching_scenes:
-        print(f"Scenes containing the word '{search_word}':")
-        for scene, caption in matching_scenes.items():
-            print(f"Scene {scene}: {caption}")
+        print(f"Scenes with captions similar to '{search_word}' (threshold: {threshold}%):")
+        for scene, (caption, similarity) in matching_scenes.items():
+            print(f"Scene {scene}: {caption} (Similarity: {similarity}%)")
     else:
-        print(f"No scenes found containing the word '{search_word}'.")
+        print(f"No scenes found with captions similar to '{search_word}' (threshold: {threshold}%).")
 
 def main():
     # Search term for the video
@@ -256,8 +261,8 @@ def main():
     generate_captions(output_folder, captions_file, model)
     print(f"Captions saved to {captions_file}")
 
-    # Allow the user to search scenes by a word
-    search_scenes_by_word(captions_file)
+    # Allow the user to search scenes by a word with a threshold for similarity
+    search_scenes_by_word(captions_file, threshold=75)  # Adjust the threshold as needed
 
 
 
