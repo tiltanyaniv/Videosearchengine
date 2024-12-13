@@ -184,6 +184,36 @@ def generate_captions(scene_folder, output_file, model):
         json.dump(captions, json_file, indent=4)
     print("Captions saved successfully.")
 
+
+def search_scenes_by_word(captions_file):
+    """
+    Search scenes for a specific word in captions.
+    """
+    if not os.path.exists(captions_file):
+        print(f"Error: Captions file not found at path: {captions_file}")
+        return
+
+    # Load captions from the JSON file
+    with open(captions_file, "r") as file:
+        captions = json.load(file)
+    
+    print("Search the video using a word:")
+    search_word = input("Enter a word: ").strip().lower()
+
+    if not search_word:
+        print("No word entered. Please try again.")
+        return
+
+    # Find scenes containing the word
+    matching_scenes = {scene: caption for scene, caption in captions.items() if search_word in caption.lower()}
+
+    if matching_scenes:
+        print(f"Scenes containing the word '{search_word}':")
+        for scene, caption in matching_scenes.items():
+            print(f"Scene {scene}: {caption}")
+    else:
+        print(f"No scenes found containing the word '{search_word}'.")
+
 def main():
     # Search term for the video
     search_term = "super mario movie trailer"
@@ -225,6 +255,9 @@ def main():
     captions_file = os.path.join(script_dir, "scene_captions.json")
     generate_captions(output_folder, captions_file, model)
     print(f"Captions saved to {captions_file}")
+
+    # Allow the user to search scenes by a word
+    search_scenes_by_word(captions_file)
 
 
 
