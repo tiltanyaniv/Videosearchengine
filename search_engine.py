@@ -9,6 +9,8 @@ import moondream as md
 from PIL import Image
 from rapidfuzz import fuzz
 from math import ceil, sqrt
+from prompt_toolkit import PromptSession
+from prompt_toolkit.completion import Completer, Completion
 
 # Get the directory of the script and construct the metadata file path
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -187,9 +189,9 @@ def generate_captions(scene_folder, output_file, model):
     print("Captions saved successfully.")
 
 
-def search_scenes_by_word(captions_file, threshold=70):
+def search_scenes_with_autocomplete(captions_file, threshold=70):
     """
-    Search scenes for a specific word or similar words in captions using RapidFuzz.
+    Search scenes for a specific word or similar words in captions using RapidFuzz with auto-complete.
     """
     if not os.path.exists(captions_file):
         print(f"Error: Captions file not found at path: {captions_file}")
@@ -198,9 +200,20 @@ def search_scenes_by_word(captions_file, threshold=70):
     # Load captions from the JSON file
     with open(captions_file, "r") as file:
         captions = json.load(file)
-    
-    print("Search the video using a word or similar words:")
-    search_word = input("Enter a word: ").strip().lower()
+
+    # Initialize the auto-complete session
+    session = PromptSession(completer=CaptionCompleter(captions))
+
+    print("Search the video using a word or similar words (with auto-complete):")
+
+    try:
+        search_word = session.prompt("Enter a word: ").strip().lower()
+    except KeyboardInterrupt:
+        print("\nSearch canceled.")
+        return
+    except EOFError:
+        print("\nExiting search.")
+        return
 
     if not search_word:
         print("No word entered. Please try again.")
@@ -270,6 +283,25 @@ def create_collage(scene_folder, matching_scenes):
     collage.save(collage_file)
     print(f"Collage created and saved as '{collage_file}'.")
 
+class CaptionCompleter(Completer):
+    """
+    Custom Completer for captions. Suggests words from captions as user types.
+    """
+    def __init__(self, captions):
+        # Extract all unique words from captions
+        self.words = set()
+        for caption in captions.values():
+            self.words.update(caption.lower().split())
+    
+    def get_completions(self, document, complete_event):
+        """
+        Provide completions for the current input.
+        """
+        text = document.text.lower()  # Get the current input text
+        for word in sorted(self.words):  # Suggest matching words
+            if word.startswith(text):  # Match words starting with the input
+                yield Completion(word, start_position=-len(text))
+
 def main():
     # Search term for the video
     search_term = "super mario movie trailer"
@@ -313,7 +345,7 @@ def main():
     print(f"Captions saved to {captions_file}")
 
     # Allow the user to search scenes by a word with a threshold for similarity
-    search_scenes_by_word(captions_file, threshold=75)  # Adjust the threshold as needed
+    search_scenes_with_autocomplete(captions_file, threshold=75)  # Adjust the threshold as needed
 
 
 
