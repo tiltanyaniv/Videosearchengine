@@ -351,7 +351,7 @@ def search_video_with_gemini(video_path):
             For each identified scene, provide:
             2. The start time in seconds.
             3. The end time in seconds.
-            Example of the desired response format:
+            Return the result as a valid JSON array with no additional text, markers, or formatting. Example of the desired response:
             [
             {{
                 "start": 12.5,
@@ -362,7 +362,6 @@ def search_video_with_gemini(video_path):
                 "end": 50.2
             }}
             ]
-            Ensure the response is in valid JSON format. If no matching scenes are found, return an empty JSON array [].
             Query: {query}""", video_file],
             generation_config=genai.GenerationConfig(
                 max_output_tokens=400,  # Limit the response to 400 tokens
@@ -372,10 +371,32 @@ def search_video_with_gemini(video_path):
 
         # Handle the response
         if response and hasattr(response, "text"):
-            print("Video analysis successful. Results:")
-            print(response.text)
+            response_text = response.text.strip()
+
+            # Remove all backticks and markers (generalized cleaning)
+            response_text = response_text.replace("```json", "").replace("```", "").strip()
+
+            try:
+                # Parse the cleaned response
+                timestamps = json.loads(response_text)
+                print("Parsed timestamps:")
+                print(json.dumps(timestamps, indent=4))  # Nicely formatted output for verification
+
+                # Process timestamps: extract frames and create a collage
+                output_folder = os.path.join(script_dir, "video_scenes")
+                extract_frames(video_path, timestamps, output_folder)
+
+                collage_path = os.path.join(script_dir, "collage.png")
+                create_collage_video_model(output_folder, collage_path)
+
+            except json.JSONDecodeError as e:
+                # Log error if JSON parsing fails
+                print(f"Error decoding JSON response: {e}")
+                print(f"Raw response after cleaning: {response_text}")
+                return
         else:
             print("Error: No valid response received from the Gemini API.")
+            return
     except Exception as e:
         print(f"An error occurred while analyzing the video: {e}")
 
@@ -408,6 +429,77 @@ def wait_for_file_to_be_active(video_file, wait_time=10, max_wait_time=300):
 
     print(f"File {file_name} did not become ACTIVE within {max_wait_time} seconds.")
     return False
+
+def extract_frames(video_path, timestamps, output_folder):
+    """
+    Extract frames corresponding to the given timestamps from the video.
+    :param video_path: Path to the video file.
+    :param timestamps: List of timestamps with start and end times.
+    :param output_folder: Folder to save the extracted frames.
+    """
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+
+    cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+
+    for idx, timestamp in enumerate(timestamps):
+        start_time = timestamp["start"]
+        end_time = timestamp["end"]
+
+        # Calculate the middle frame between start and end
+        start_frame = int(start_time * fps)
+        end_frame = int(end_time * fps)
+        middle_frame = (start_frame + end_frame) // 2
+
+        # Set the video position to the middle frame and read it
+        cap.set(cv2.CAP_PROP_POS_FRAMES, middle_frame)
+        ret, frame = cap.read()
+        if ret:
+            output_path = os.path.join(output_folder, f"scene_{idx + 1}.jpg")
+            cv2.imwrite(output_path, frame)
+        else:
+            print(f"Warning: Unable to extract frame for scene {idx + 1}")
+
+    cap.release()
+    print(f"Frames saved to {output_folder}.")
+
+
+def create_collage_video_model(output_folder, collage_path):
+    """
+    Create a collage from images in the output folder and save it as a single file.
+    :param output_folder: Folder containing scene images.
+    :param collage_path: Path to save the collage image.
+    """
+    image_paths = [
+        os.path.join(output_folder, f) for f in os.listdir(output_folder) if f.endswith(".jpg")
+    ]
+    if not image_paths:
+        print("No images found to create a collage.")
+        return
+
+    # Load images
+    images = [Image.open(path) for path in image_paths]
+
+    # Calculate collage grid dimensions
+    num_images = len(images)
+    grid_size = ceil(sqrt(num_images))
+    image_width, image_height = images[0].size
+
+    # Create blank canvas for the collage
+    collage_width = grid_size * image_width
+    collage_height = grid_size * image_height
+    collage = Image.new("RGB", (collage_width, collage_height), (255, 255, 255))
+
+    # Paste images into the collage
+    for idx, img in enumerate(images):
+        x = (idx % grid_size) * image_width
+        y = (idx // grid_size) * image_height
+        collage.paste(img, (x, y))
+
+    # Save the collage
+    collage.save(collage_path)
+    print(f"Collage saved as {collage_path}.")
 
 
 
