@@ -3,6 +3,7 @@ import json
 import os
 from scenedetect import VideoManager, SceneManager
 from scenedetect.detectors import ContentDetector
+from scenedetect.scene_manager import save_images
 import cv2
 import numpy as np
 import moondream as md
@@ -93,16 +94,6 @@ def download_video(query, metadata):
         }
         return metadata
 
-def is_black_scene(image_path, threshold=10):
-    """Check if the image is predominantly black."""
-    image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-    if image is None:
-        return False  # Skip if image couldn't be loaded
-    # Calculate the percentage of pixels below the black threshold
-    black_pixel_count = np.sum(image < threshold)
-    total_pixel_count = image.size
-    black_percentage = (black_pixel_count / total_pixel_count) * 100
-    return black_percentage > 90  # Consider as black if >90% pixels are black
 
 def detect_scenes(video_path, output_folder):
     """Detect scenes and save images to the output folder."""
@@ -113,7 +104,7 @@ def detect_scenes(video_path, output_folder):
 
     video_manager = VideoManager([video_path])
     scene_manager = SceneManager()
-    scene_manager.add_detector(ContentDetector(threshold=40.0))  # Adjust threshold here
+    scene_manager.add_detector(ContentDetector(threshold=30.0))  # Adjust threshold here
     video_manager.set_downscale_factor()
 
     video_manager.start()
@@ -122,23 +113,22 @@ def detect_scenes(video_path, output_folder):
     # Retrieve the list of detected scenes
     scenes = scene_manager.get_scene_list()
     print(f"Detected {len(scenes)} scenes.")
+
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
 
-    for i, scene in enumerate(scenes):
-        start_frame, end_frame = scene
-        output_path = f"{output_folder}/scene_{i+1}.jpg"
-        # OpenCV to extract and save frames
-        cap = cv2.VideoCapture(video_path)
-        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame.get_frames())  # Set the frame position
-        ret, frame = cap.read()
-        if ret:
-            cv2.imwrite(output_path, frame)  # Save the frame as an image
-        cap.release()
-
-        # Remove black scenes
-        if is_black_scene(output_path):
-            os.remove(output_path)
+    # Save images for each scene
+    save_images(
+        scene_list=scenes,
+        video=video_manager,
+        num_images=3,  # Adjust to the desired number of images per scene
+        frame_margin=1,
+        image_extension='jpg',
+        encoder_param=95,
+        image_name_template='$VIDEO_NAME-Scene-$SCENE_NUMBER-$IMAGE_NUMBER',
+        output_dir=output_folder,
+        show_progress=True,  # Displays a progress bar if tqdm is installed
+    )
 
     video_manager.release()
 
@@ -387,7 +377,7 @@ def search_video_with_gemini(video_path):
                 extract_frames(video_path, timestamps, output_folder)
 
                 collage_path = os.path.join(script_dir, "collage.png")
-                create_collage_video_model(output_folder, collage_path)
+                create_collage(output_folder, collage_path)
 
             except json.JSONDecodeError as e:
                 # Log error if JSON parsing fails
@@ -465,42 +455,6 @@ def extract_frames(video_path, timestamps, output_folder):
     print(f"Frames saved to {output_folder}.")
 
 
-def create_collage_video_model(output_folder, collage_path):
-    """
-    Create a collage from images in the output folder and save it as a single file.
-    :param output_folder: Folder containing scene images.
-    :param collage_path: Path to save the collage image.
-    """
-    image_paths = [
-        os.path.join(output_folder, f) for f in os.listdir(output_folder) if f.endswith(".jpg")
-    ]
-    if not image_paths:
-        print("No images found to create a collage.")
-        return
-
-    # Load images
-    images = [Image.open(path) for path in image_paths]
-
-    # Calculate collage grid dimensions
-    num_images = len(images)
-    grid_size = ceil(sqrt(num_images))
-    image_width, image_height = images[0].size
-
-    # Create blank canvas for the collage
-    collage_width = grid_size * image_width
-    collage_height = grid_size * image_height
-    collage = Image.new("RGB", (collage_width, collage_height), (255, 255, 255))
-
-    # Paste images into the collage
-    for idx, img in enumerate(images):
-        x = (idx % grid_size) * image_width
-        y = (idx // grid_size) * image_height
-        collage.paste(img, (x, y))
-
-    # Save the collage
-    collage.save(collage_path)
-    print(f"Collage saved as {collage_path}.")
-
 
 
 def main():
@@ -536,7 +490,7 @@ def main():
         print("Using the image-based model for search...")
 
         # Detect scenes
-        output_folder = os.path.join(script_dir, "scenes")
+        output_folder = os.path.join(script_dir, "image_scenes")
         detect_scenes(video_path, output_folder)
 
         # Generate captions
