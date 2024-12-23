@@ -104,7 +104,7 @@ def detect_scenes(video_path, output_folder):
 
     video_manager = VideoManager([video_path])
     scene_manager = SceneManager()
-    scene_manager.add_detector(ContentDetector(threshold=30.0))  # Adjust threshold here
+    scene_manager.add_detector(ContentDetector(threshold=45.0))  # Adjust threshold here
     video_manager.set_downscale_factor()
 
     video_manager.start()
@@ -121,7 +121,7 @@ def detect_scenes(video_path, output_folder):
     save_images(
         scene_list=scenes,
         video=video_manager,
-        num_images=3,  # Adjust to the desired number of images per scene
+        num_images=1,  # Adjust to the desired number of images per scene
         frame_margin=1,
         image_extension='jpg',
         encoder_param=95,
@@ -158,12 +158,12 @@ def generate_captions(scene_folder, output_file, model):
     captions = {}
     # Sort files numerically by scene number
     scene_files = sorted(
-        [f for f in os.listdir(scene_folder) if f.startswith("scene_") and f.endswith(".jpg")],
-        key=lambda x: int(x.split("_")[1].split(".")[0])
+        [f for f in os.listdir(scene_folder) if f.endswith(".jpg")],  # Ensure only image files are considered
+        key=lambda x: int(x.split("-Scene-")[1].split("-")[0])  # Extract the scene number from the filename
     )
 
     for scene_file in scene_files:
-        scene_number = int(scene_file.split("_")[1].split(".")[0])  # Extract scene number
+        scene_number = int(scene_file.split("-Scene-")[1].split("-")[0]) # Extract scene number
         scene_path = os.path.join(scene_folder, scene_file)
         print(f"Generating caption for scene {scene_number}...")
 
@@ -225,12 +225,12 @@ def search_scenes_with_autocomplete(captions_file, threshold=70):
             print(f"Scene {scene}: {caption} (Similarity: {similarity}%)")
         
         # Create a collage of matching scenes
-        scene_folder = os.path.join(script_dir, "scenes")
-        create_collage(scene_folder, matching_scenes)
+        scene_folder = os.path.join(script_dir, "image_scenes")
+        create_collage_image_model(scene_folder, matching_scenes)
     else:
         print(f"No scenes found with captions similar to '{search_word}' (threshold: {threshold}%).")
 
-def create_collage(scene_folder, matching_scenes):
+def create_collage_image_model(scene_folder, matching_scenes):
     """
     Create a collage of all matching scene images and save it to 'collage.png'.
     """
@@ -239,11 +239,16 @@ def create_collage(scene_folder, matching_scenes):
         return
 
     # Get paths of matching scene images
-    image_paths = [
-        os.path.join(scene_folder, f"scene_{scene}.jpg")
-        for scene in matching_scenes.keys()
-        if os.path.exists(os.path.join(scene_folder, f"scene_{scene}.jpg"))
-    ]
+    image_paths = []
+    for scene in matching_scenes.keys():
+        # Use the new naming convention to match scene files
+        pattern = f"-Scene-{str(scene).zfill(3)}-"  # Match Scene numbers padded to 3 digits
+        matching_files = [
+            f for f in os.listdir(scene_folder)
+            if pattern in f and f.endswith(".jpg")
+        ]
+        if matching_files:
+            image_paths.append(os.path.join(scene_folder, matching_files[0]))  # Add the first match
 
     if not image_paths:
         print("No images found for matching scenes.")
@@ -275,6 +280,36 @@ def create_collage(scene_folder, matching_scenes):
     collage_file = os.path.join(script_dir, "collage.png")
     collage.save(collage_file)
     print(f"Collage created and saved as '{collage_file}'.")
+
+def create_collage_video_model(output_folder, collage_path):
+    """
+    Create a collage from images in the output folder and save it as a single file.
+    :param output_folder: Folder containing scene images.
+    :param collage_path: Path to save the collage image.
+    """
+    image_paths = [
+        os.path.join(output_folder, f) for f in os.listdir(output_folder) if f.endswith(".jpg")
+    ]
+    if not image_paths:
+        print("No images found to create a collage.")
+        return
+    # Load images
+    images = [Image.open(path) for path in image_paths]
+    # Calculate collage grid dimensions
+    num_images = len(images)
+    grid_size = ceil(sqrt(num_images))
+    image_width, image_height = images[0].size
+    # Create blank canvas for the collage
+    collage_width = grid_size * image_width
+    collage_height = grid_size * image_height
+    collage = Image.new("RGB", (collage_width, collage_height), (255, 255, 255))
+    # Paste images into the collage
+    for idx, img in enumerate(images):
+        x = (idx % grid_size) * image_width
+        y = (idx // grid_size) * image_height
+        collage.paste(img, (x, y))
+    # Save the collage
+    collage.save(collage_path)
 
 class CaptionCompleter(Completer):
     """
@@ -377,7 +412,7 @@ def search_video_with_gemini(video_path):
                 extract_frames(video_path, timestamps, output_folder)
 
                 collage_path = os.path.join(script_dir, "collage.png")
-                create_collage(output_folder, collage_path)
+                create_collage_video_model(output_folder, collage_path)
 
             except json.JSONDecodeError as e:
                 # Log error if JSON parsing fails
